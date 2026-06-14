@@ -1,0 +1,8 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /profile/
+Disallow: /login
+
+Sitemap: https://agnesstudio.com/sitemap.xml
