@@ -1,6 +1,6 @@
 """User Profile API Routes"""
 import logging
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from pathlib import Path
@@ -13,6 +13,8 @@ from app.models.image import ImageGeneration
 from app.models.video import VideoGeneration
 from app.core.config import settings
 from app.utils.helpers import sanitize_filename
+from app.schemas.credit import CreditTransactionListResponse
+from app.services.credit_service import credit_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -84,4 +86,23 @@ async def get_user_stats(
         "credits": current_user.credits,
         "total_images": image_count_result.scalar() or 0,
         "total_videos": video_count_result.scalar() or 0,
+    }
+
+
+@router.get("/credits/transactions", response_model=CreditTransactionListResponse)
+async def list_credit_transactions(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated list of the current user's credit transactions."""
+    items, total = await credit_service.get_user_transactions(
+        db, current_user.id, page, per_page,
+    )
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
     }
