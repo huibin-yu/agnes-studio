@@ -32,6 +32,8 @@ class VideoGeneration(Base):
     error_message = Column(Text, default=None)
     expires_at = Column(SqlAlchemyDateTime(timezone=True), default=None)
 
+    credits_charged = Column(Integer, default=0, nullable=False)
+
     # Metadata
     parameters = Column(JSON, default=dict)
 
