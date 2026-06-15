@@ -69,3 +69,31 @@ async def get_current_user(
         raise credentials_exception
 
     return user
+
+
+async def get_current_user_optional(
+    token: Optional[str] = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """Like get_current_user but returns None instead of raising 401 for unauthenticated requests."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: Optional[int] = payload.get("sub")
+        token_type: Optional[str] = payload.get("type")
+        token_version: Optional[int] = payload.get("tv")
+        if user_id is None or token_type != "access":
+            return None
+    except JWTError:
+        return None
+
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
+
+    if token_version is not None and token_version != user.token_version:
+        return None
+
+    return user

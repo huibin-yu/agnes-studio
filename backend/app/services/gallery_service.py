@@ -2,11 +2,12 @@
 import logging
 from typing import Dict, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, literal_column
+from sqlalchemy import select, func, update, delete
 from sqlalchemy.orm import joinedload
 from fastapi import HTTPException, status
 
 from app.models.gallery import GalleryItem
+from app.models.gallery_like import GalleryLike
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,8 @@ class GalleryService:
     async def get_public_gallery(
         self, db: AsyncSession, page: int = 1, per_page: int = 20,
         query: Optional[str] = None, style: Optional[str] = None,
-        tags: Optional[List[str]] = None, sort: str = "newest"
+        tags: Optional[List[str]] = None, sort: str = "newest",
+        viewer_id: Optional[int] = None,
     ):
         q = select(GalleryItem).options(
             joinedload(GalleryItem.user)
@@ -80,17 +82,19 @@ class GalleryService:
         result = await db.execute(q)
         items = result.scalars().all()
 
-        # Atomically increment views for displayed items (no race condition)
-        item_ids = [item.id for item in items]
-        if item_ids:
-            await db.execute(
-                update(GalleryItem)
-                .where(GalleryItem.id.in_(item_ids))
-                .values(views=GalleryItem.views + 1)
+        # Build is_liked set for the current viewer
+        liked_ids = set()
+        if viewer_id and items:
+            item_ids = [item.id for item in items]
+            like_result = await db.execute(
+                select(GalleryLike.item_id).where(
+                    GalleryLike.user_id == viewer_id,
+                    GalleryLike.item_id.in_(item_ids),
+                )
             )
-            await db.commit()
+            liked_ids = {row[0] for row in like_result.all()}
 
-        return items, total
+        return items, total, liked_ids
 
     async def get_user_gallery(self, db: AsyncSession, user_id: int, page: int = 1, per_page: int = 20):
         offset = (page - 1) * per_page
@@ -111,7 +115,7 @@ class GalleryService:
 
         return items, total
 
-    async def get_public_item(self, db: AsyncSession, item_id: int) -> GalleryItem:
+    async def get_public_item(self, db: AsyncSession, item_id: int, viewer_id: Optional[int] = None):
         result = await db.execute(
             select(GalleryItem)
             .where(
@@ -124,6 +128,7 @@ class GalleryService:
         if not item:
             raise HTTPException(status_code=404, detail="Gallery item not found")
 
+        # Increment view count
         await db.execute(
             update(GalleryItem)
             .where(GalleryItem.id == item_id)
@@ -131,10 +136,23 @@ class GalleryService:
         )
         await db.commit()
         await db.refresh(item)
-        return item
 
-    async def like_item(self, db: AsyncSession, item_id: int, user_id: int) -> GalleryItem:
-        """Atomically increment like count"""
+        # Check if current viewer has liked this item
+        is_liked = False
+        if viewer_id:
+            like_result = await db.execute(
+                select(GalleryLike).where(
+                    GalleryLike.user_id == viewer_id,
+                    GalleryLike.item_id == item_id,
+                )
+            )
+            is_liked = like_result.scalar_one_or_none() is not None
+
+        return item, is_liked
+
+    async def toggle_like(self, db: AsyncSession, item_id: int, user_id: int):
+        """Toggle like: if already liked, unlike; if not liked, like.
+        Returns (item, is_liked) tuple."""
         result = await db.execute(
             select(GalleryItem).where(GalleryItem.id == item_id)
         )
@@ -142,15 +160,37 @@ class GalleryService:
         if not item:
             raise HTTPException(status_code=404, detail="Gallery item not found")
 
-        # Atomic increment to prevent race condition
-        await db.execute(
-            update(GalleryItem)
-            .where(GalleryItem.id == item_id)
-            .values(likes=GalleryItem.likes + 1)
+        # Check if already liked
+        existing = await db.execute(
+            select(GalleryLike).where(
+                GalleryLike.user_id == user_id,
+                GalleryLike.item_id == item_id,
+            )
         )
+        like_record = existing.scalar_one_or_none()
+
+        if like_record:
+            # Unlike: remove record, decrement count
+            await db.delete(like_record)
+            await db.execute(
+                update(GalleryItem)
+                .where(GalleryItem.id == item_id)
+                .values(likes=GalleryItem.likes - 1)
+            )
+            is_liked = False
+        else:
+            # Like: add record, increment count
+            db.add(GalleryLike(user_id=user_id, item_id=item_id))
+            await db.execute(
+                update(GalleryItem)
+                .where(GalleryItem.id == item_id)
+                .values(likes=GalleryItem.likes + 1)
+            )
+            is_liked = True
+
         await db.commit()
         await db.refresh(item)
-        return item
+        return item, is_liked
 
     async def delete_item(self, db: AsyncSession, item_id: int, user_id: int) -> bool:
         result = await db.execute(

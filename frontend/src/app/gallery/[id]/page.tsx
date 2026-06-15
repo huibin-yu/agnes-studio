@@ -21,6 +21,7 @@ interface GalleryItem {
   tags: string[]
   likes: number
   views: number
+  is_liked: boolean
   user: {
     id: number
     username: string
@@ -68,7 +69,7 @@ export default function GalleryDetailPage() {
     setLiking(true)
     try {
       const resp = await api.post(`/gallery/${item.id}/like`)
-      setItem({ ...item, likes: resp.data.likes })
+      setItem({ ...item, likes: resp.data.likes, is_liked: resp.data.is_liked })
     } catch {
       setError("点赞失败，请登录后重试")
     } finally {
@@ -200,8 +201,12 @@ export default function GalleryDetailPage() {
                 <Bookmark className="w-4 h-4 mr-2" />
                 {favorited ? "已收藏" : "收藏"}
               </Button>
-              <Button variant="outline" onClick={likeItem} disabled={liking}>
-                {liking ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Heart className="w-4 h-4 mr-2" />}
+              <Button variant={item.is_liked ? "default" : "outline"} onClick={likeItem} disabled={liking}>
+                {liking ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Heart className={`w-4 h-4 mr-2 ${item.is_liked ? "fill-current" : ""}`} />
+                )}
                 {item.likes}
               </Button>
               <Button variant="outline" onClick={() => window.open(item.media_url, "_blank", "noopener,noreferrer")}>

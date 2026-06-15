@@ -24,6 +24,7 @@ interface GalleryItem {
   style: string
   likes: number
   views: number
+  is_liked: boolean
   user: GalleryUser
 }
 

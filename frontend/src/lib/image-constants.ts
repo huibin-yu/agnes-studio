@@ -31,25 +31,4 @@ export const IMAGE_STYLES = [
   { id: 'comic', label: 'Comic' },
 ]
 
-export const IMAGE_PROMPT_TEMPLATES = [
-  {
-    id: 1,
-    name: 'Landscape',
-    template: 'A majestic mountain range at sunset, golden light, dramatic clouds, 8k ultra detailed',
-  },
-  {
-    id: 2,
-    name: 'Portrait',
-    template: 'Elegant woman with flowing hair, soft lighting, bokeh background, cinematic portrait',
-  },
-  {
-    id: 3,
-    name: 'Sci-Fi',
-    template: 'Futuristic space station orbiting a gas giant, stars in background, detailed sci-fi concept art',
-  },
-  {
-    id: 4,
-    name: 'Anime',
-    template: 'Chibi character, pastel colors, sparkles, cute anime style, kawaii',
-  },
-]
+
