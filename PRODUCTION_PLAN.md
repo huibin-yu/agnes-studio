@@ -196,3 +196,44 @@
 - 视频模板卡片：`<div onClick>` 改为 `<button type="button">`
 - 错误处理：`catch (err: any)` 替换为类型安全写法
 - 视频页面 UI 文本中文化
+
+### 资损与越权急修包完成 ✅ (2026-06-15)
+
+#### 阶段 1：图像失败不扣积分 ✅
+- `image_service.generate` 仅在 `image_url` 非空且上游未异常时扣 `IMAGE_COST`
+- 上游异常：积分不变，抛 503
+- 上游返回空 url：记录 `status=failed`，积分不变
+
+#### 阶段 2：视频积分扣减 ✅
+- `video_generations` 新增 `credits_charged` 列
+- `create_video` 上游成功后按 `ceil(duration * VIDEO_COST_PER_SECOND)` 扣分
+- 余额不足返 402；上游失败不扣分
+- `VideoGenerateResponse` 暴露 `credits_charged`
+- 已知限制见 `docs/KNOWN_ISSUES.md`
+
+#### 阶段 3：积分 ledger + 行锁 ✅
+- 新增 `credit_transactions` 表 + `CreditService`（charge / grant / get_user_transactions）
+- `with_for_update()` 行锁防并发超扣（PG 生效，SQLite no-op）
+- `image_service` / `video_service` / `auth_service.register` 全部改走 ledger
+- 新增 `GET /api/users/credits/transactions` 流水分页查询
+- 历史用户回填脚本：`backend/scripts/backfill_credit_ledger.py`
+
+#### 阶段 4：视频越权 + URL bug ✅
+- `poll_video_status` 强制 `user_id` 校验，越权返 404
+- `_extract_video_url` 纯函数按 fallback 顺序取 URL，拒绝非 http 字符串
+- 无 URL 时判失败并退款（`credits_charged` 置 0 防重入）
+- `failed` 状态首次见到时退款，幂等
+
+#### Commits
+- `f2204ab` fix(image): 仅在生成成功时扣减积分
+- `78c75ac` feat(video): 添加 credits_charged 列
+- `17f72d4` feat(video): 视频生成预扣积分
+- `5afde95` docs: 已知限制
+- `932990f` feat(credit): CreditTransaction 模型
+- `8c5f287` feat(credit): CreditService
+- `b9edd39` refactor(image): 扣分改走 ledger
+- `7a9b870` refactor(video): 扣分改走 ledger
+- `c71d2d8` refactor(auth): 注册赠送改走 grant
+- `d1208c9` feat(api): 流水查询 API
+- `b301993` feat(credit): 回填脚本
+- `5234ad3` fix(video): 越权校验 + URL bug + 退款
