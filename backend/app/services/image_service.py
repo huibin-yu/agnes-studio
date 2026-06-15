@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class ImageService:
     async def generate(self, db: AsyncSession, user_id: int, data: Dict) -> ImageGeneration:
-        # Check credits
+        # Pre-check (cheap UX-only check; authoritative check is in credit_service)
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if not user:
@@ -25,10 +25,10 @@ class ImageService:
         if user.credits < settings.IMAGE_COST:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Insufficient credits. Please recharge."
+                detail="Insufficient credits. Please recharge.",
             )
 
-        # Call Agnes AI
+        # Call Agnes AI (do NOT charge yet)
         try:
             agnes_response = await agnes_service.generate_image(
                 prompt=data["prompt"],
@@ -41,11 +41,11 @@ class ImageService:
             logger.error(f"Image generation service error for user {user_id}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Image generation service is temporarily unavailable. Please try again later."
+                detail="Image generation service is temporarily unavailable. Please try again later.",
             )
 
-        # Save to DB
         image_url = agnes_response.get("image_url", "")
+        succeeded = bool(image_url)
 
         image_gen = ImageGeneration(
             user_id=user_id,
@@ -55,24 +55,55 @@ class ImageService:
             size=data.get("size", settings.IMAGE_DEFAULT_SIZE),
             style=data.get("style", "none"),
             image_url=image_url,
-            status="completed" if image_url else "failed",
+            status="completed" if succeeded else "failed",
             parameters=data,
         )
-
-        if not image_url:
+        if not succeeded:
             image_gen.error_message = "Image generation returned no result"
 
         db.add(image_gen)
+        await db.flush()  # so image_gen.id is populated
 
-        # Only charge on success
-        if image_url:
-            user.credits -= settings.IMAGE_COST
+        if succeeded:
+            from app.services.credit_service import (
+                credit_service, InsufficientCreditsError,
+            )
+            from app.models.credit_transaction import TX_IMAGE_GENERATE
+            try:
+                await credit_service.charge(
+                    db, user_id, settings.IMAGE_COST,
+                    type=TX_IMAGE_GENERATE,
+                    ref_type="image", ref_id=image_gen.id,
+                )
+            except InsufficientCreditsError:
+                # Race lost: balance dropped between pre-check and charge.
+                await db.rollback()
+                logger.warning(
+                    f"Concurrency race: insufficient credits for user {user_id} after upstream success"
+                )
+                # Re-add a failed record after rollback so user sees the attempt
+                image_gen = ImageGeneration(
+                    user_id=user_id,
+                    prompt=data["prompt"],
+                    negative_prompt=data.get("negative_prompt", ""),
+                    model=data.get("model", "agnes-image-2.1-flash"),
+                    size=data.get("size", settings.IMAGE_DEFAULT_SIZE),
+                    style=data.get("style", "none"),
+                    image_url=image_url,
+                    status="failed",
+                    error_message="Insufficient credits at charge time",
+                    parameters=data,
+                )
+                db.add(image_gen)
+                await db.commit()
+                await db.refresh(image_gen)
+                return image_gen
 
         await db.commit()
         await db.refresh(image_gen)
         logger.info(
             f"Image {image_gen.id} generated for user {user_id}, "
-            f"status={image_gen.status}, credits remaining: {user.credits}"
+            f"status={image_gen.status}"
         )
         return image_gen
 

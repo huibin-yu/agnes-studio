@@ -103,3 +103,39 @@ async def test_image_generate_empty_url_does_not_charge(db, monkeypatch):
     assert image.status == "failed"
     refreshed = (await db.execute(select(User).where(User.id == user.id))).scalar_one()
     assert refreshed.credits == 10  # not charged
+
+
+@pytest.mark.asyncio
+async def test_image_success_writes_ledger_entry(db, monkeypatch):
+    from app.models.credit_transaction import CreditTransaction, TX_IMAGE_GENERATE
+
+    user = User(
+        email="img-led@example.com",
+        username="imgled",
+        hashed_password="x",
+        credits=10,
+        referral_code="REFLED01",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    async def fake(**kwargs):
+        return {"image_url": "https://example.com/x.png"}
+
+    monkeypatch.setattr(
+        "app.services.image_service.agnes_service.generate_image", fake
+    )
+
+    image = await image_service.generate(db, user.id, {
+        "prompt": "p", "model": "agnes-image-2.1-flash",
+        "size": "1024x768", "style": "none",
+    })
+
+    txs = (await db.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user.id)
+    )).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].type == TX_IMAGE_GENERATE
+    assert txs[0].amount == -1
+    assert txs[0].ref_id == image.id
