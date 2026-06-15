@@ -17,6 +17,45 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 
+def _extract_video_url(payload: dict) -> Optional[str]:
+    """Extract a video URL from upstream payload across known shapes.
+
+    Returns None if no plausible URL is found. Pure function, no IO.
+    """
+    def _is_url(v):
+        return isinstance(v, str) and v.startswith(("http://", "https://"))
+
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("video_url", "url", "download_url", "output_url"):
+        v = payload.get(key)
+        if _is_url(v):
+            return v
+
+    output = payload.get("output")
+    if isinstance(output, list) and output:
+        first = output[0]
+        if isinstance(first, dict):
+            for key in ("video_url", "url", "download_url"):
+                v = first.get(key)
+                if _is_url(v):
+                    return v
+        elif _is_url(first):
+            return first
+    elif isinstance(output, dict):
+        for key in ("video_url", "url", "download_url"):
+            v = output.get(key)
+            if _is_url(v):
+                return v
+
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return _extract_video_url(data)
+
+    return None
+
+
 class VideoService:
     """Service for video generation workflow"""
 
@@ -143,59 +182,88 @@ class VideoService:
             "created_at": video_gen.created_at,
         }
 
-    async def poll_video_status(self, db: AsyncSession, video_id: str,
-                               user_id: int = None) -> Dict:
-        """
-        Poll video generation status using video_id (RECOMMENDED method)
+    async def poll_video_status(
+        self, db: AsyncSession, video_id: str, user_id: int = None,
+    ) -> Dict:
+        """Poll video generation status.
 
-        Args:
-            db: Database session
-            video_id: Video ID to poll
-            user_id: Optional user ID for permission check
-
-        Returns:
-            Dict with video status and result
+        - 强制 user_id 校验：找不到记录或不属于该用户都返回 404。
+        - 成功时按 fallback 顺序提取 video URL；提取失败按"完成但无 URL"处理并退款。
+        - 失败时退款一次（防重入：credits_charged > 0 才退）。
         """
-        # Find video generation record
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="user_id is required")
+
         result = await db.execute(
-            select(VideoGeneration).where(VideoGeneration.video_id == video_id)
+            select(VideoGeneration).where(
+                VideoGeneration.video_id == video_id,
+                VideoGeneration.user_id == user_id,
+            )
         )
         video_gen = result.scalar_one_or_none()
-
         if not video_gen:
-            raise ValueError(f"Video not found: {video_id}")
+            raise HTTPException(status_code=404, detail="Video not found")
 
-        # Call Agnes AI API to poll status
         try:
             api_response = await agnes_service.poll_video_status(video_id)
-
-            # Update database record
-            video_gen.status = api_response.get("status")
-            video_gen.progress = api_response.get("progress", 0)
-            video_gen.model_name = api_response.get("model")
-
-            # Update video URL if completed
-            if api_response.get("status") == "completed":
-                video_gen.video_url = api_response.get("remixed_from_video_id")
-                video_gen.expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-
-            # Handle failure
-            if api_response.get("status") == "failed":
-                video_gen.error_message = api_response.get("error", {}).get("message", "Unknown error")
-
-            await db.commit()
-
-            return {
-                "status": api_response.get("status"),
-                "progress": api_response.get("progress", 0),
-                "video_url": api_response.get("remixed_from_video_id") if api_response.get("status") == "completed" else None,
-                "error_message": api_response.get("error", {}).get("message") if api_response.get("status") == "failed" else None,
-                "seconds": api_response.get("seconds"),
-                "size": api_response.get("size")
-            }
         except Exception as e:
             logger.error(f"Failed to poll video status for {video_id}: {e}")
             raise Exception("Failed to poll video status. Please try again later.")
+
+        upstream_status = api_response.get("status")
+        progress = api_response.get("progress", 0)
+
+        from app.services.credit_service import credit_service
+        from app.models.credit_transaction import TX_VIDEO_REFUND
+
+        async def _refund_if_needed(reason: str):
+            if video_gen.credits_charged and video_gen.credits_charged > 0:
+                await credit_service.grant(
+                    db, video_gen.user_id, video_gen.credits_charged,
+                    type=TX_VIDEO_REFUND,
+                    ref_type="video", ref_id=video_gen.id,
+                    note=reason,
+                )
+                video_gen.credits_charged = 0
+
+        video_gen.progress = progress
+
+        error_message = None
+        if upstream_status == "completed":
+            url = _extract_video_url(api_response)
+            if url:
+                video_gen.video_url = url
+                video_gen.status = "completed"
+                video_gen.expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+            else:
+                logger.error(
+                    f"Video {video_gen.id} marked completed but URL missing. "
+                    f"Response: {str(api_response)[:500]}"
+                )
+                video_gen.status = "failed"
+                video_gen.error_message = "Upstream completed but no video URL"
+                error_message = video_gen.error_message
+                await _refund_if_needed("completed_no_url")
+                upstream_status = "failed"
+        elif upstream_status == "failed":
+            err = api_response.get("error") or {}
+            video_gen.status = "failed"
+            video_gen.error_message = err.get("message", "Unknown error") if isinstance(err, dict) else str(err)
+            error_message = video_gen.error_message
+            await _refund_if_needed("generation_failed")
+        else:
+            video_gen.status = upstream_status or video_gen.status
+
+        await db.commit()
+
+        return {
+            "status": upstream_status,
+            "progress": progress,
+            "video_url": video_gen.video_url if upstream_status == "completed" else None,
+            "error_message": error_message,
+            "seconds": api_response.get("seconds"),
+            "size": api_response.get("size"),
+        }
 
     async def get_video_by_id(self, db: AsyncSession, video_id: int,
                              user_id: int = None) -> VideoGeneration:
