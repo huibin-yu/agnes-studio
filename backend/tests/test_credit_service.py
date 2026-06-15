@@ -134,3 +134,43 @@ async def test_video_refund_idempotent_via_caller(db):
 
     refreshed = (await db.execute(select(User).where(User.id == user.id))).scalar_one()
     assert refreshed.credits == 20  # 10 + 5 + 5
+
+
+@pytest.mark.asyncio
+async def test_backfill_script_is_idempotent(db):
+    """Running backfill twice should produce a single migration_initial row."""
+    from app.models.credit_transaction import (
+        CreditTransaction, TX_MIGRATION_INITIAL,
+    )
+    user = await _make_user(db, "backfill@example.com", credits=42)
+    from sqlalchemy import select as _select, func as _func
+
+    async def _do_backfill(session):
+        count = (await session.execute(
+            _select(_func.count(CreditTransaction.id))
+            .where(CreditTransaction.user_id == user.id)
+        )).scalar() or 0
+        if count > 0:
+            return 0
+        session.add(CreditTransaction(
+            user_id=user.id, amount=user.credits,
+            balance_after=user.credits,
+            type=TX_MIGRATION_INITIAL,
+            note="initial backfill",
+        ))
+        return 1
+
+    inserted_first = await _do_backfill(db)
+    await db.commit()
+    inserted_second = await _do_backfill(db)
+    await db.commit()
+
+    assert inserted_first == 1
+    assert inserted_second == 0
+
+    txs = (await db.execute(
+        _select(CreditTransaction).where(CreditTransaction.user_id == user.id)
+    )).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].type == TX_MIGRATION_INITIAL
+    assert txs[0].amount == 42
