@@ -17,10 +17,18 @@ export const IMAGE_STYLES = [
   { id: 'none', label: 'No Style' },
   { id: 'cinematic', label: 'Cinematic' },
   { id: 'anime', label: 'Anime' },
-  { id: 'photographic', label: 'Photographic' },
+  { id: 'realistic', label: 'Photorealistic' },
   { id: 'digital-art', label: 'Digital Art' },
+  { id: 'oil-painting', label: 'Oil Painting' },
+  { id: 'watercolor', label: 'Watercolor' },
   { id: 'pixel-art', label: 'Pixel Art' },
-  { id: 'fantasy-art', label: 'Fantasy Art' },
+  { id: '3d-render', label: '3D Render' },
+  { id: 'fantasy', label: 'Fantasy' },
+  { id: 'scifi', label: 'Sci-Fi' },
+  { id: 'horror', label: 'Horror' },
+  { id: 'minimalist', label: 'Minimalist' },
+  { id: 'pop-art', label: 'Pop Art' },
+  { id: 'comic', label: 'Comic' },
 ]
 
 export const IMAGE_PROMPT_TEMPLATES = [

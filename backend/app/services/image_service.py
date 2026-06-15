@@ -107,6 +107,96 @@ class ImageService:
         )
         return image_gen
 
+    async def generate_img2img(self, db: AsyncSession, user_id: int, data: Dict) -> ImageGeneration:
+        """Generate an image using image-to-image (reference image + prompt)"""
+        # Pre-check credits
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if user.credits < settings.IMAGE_COST:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits. Please recharge.",
+            )
+
+        # Call Agnes AI image-to-image
+        try:
+            agnes_response = await agnes_service.generate_image_to_image(
+                prompt=data["prompt"],
+                image_url=data["image_url"],
+                model=data.get("model", "agnes-image-2.1-flash"),
+                size=data.get("size", settings.IMAGE_DEFAULT_SIZE),
+            )
+        except Exception as e:
+            logger.error(f"Image-to-image service error for user {user_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Image generation service is temporarily unavailable. Please try again later.",
+            )
+
+        image_url = agnes_response.get("image_url", "")
+        succeeded = bool(image_url)
+
+        image_gen = ImageGeneration(
+            user_id=user_id,
+            prompt=data["prompt"],
+            negative_prompt="",
+            model=data.get("model", "agnes-image-2.1-flash"),
+            size=data.get("size", settings.IMAGE_DEFAULT_SIZE),
+            style="none",
+            image_url=image_url,
+            status="completed" if succeeded else "failed",
+            parameters={**data, "mode": "img2img"},
+        )
+        if not succeeded:
+            image_gen.error_message = "Image-to-image returned no result"
+
+        db.add(image_gen)
+        await db.flush()
+
+        if succeeded:
+            from app.services.credit_service import (
+                credit_service, InsufficientCreditsError,
+            )
+            from app.models.credit_transaction import TX_IMAGE_GENERATE
+            try:
+                await credit_service.charge(
+                    db, user_id, settings.IMAGE_COST,
+                    type=TX_IMAGE_GENERATE,
+                    ref_type="image", ref_id=image_gen.id,
+                )
+            except InsufficientCreditsError:
+                await db.rollback()
+                logger.warning(
+                    f"Concurrency race: insufficient credits for user {user_id} after img2img success"
+                )
+                image_gen = ImageGeneration(
+                    user_id=user_id,
+                    prompt=data["prompt"],
+                    negative_prompt="",
+                    model=data.get("model", "agnes-image-2.1-flash"),
+                    size=data.get("size", settings.IMAGE_DEFAULT_SIZE),
+                    style="none",
+                    image_url=image_url,
+                    status="failed",
+                    error_message="Insufficient credits at charge time",
+                    parameters={**data, "mode": "img2img"},
+                )
+                db.add(image_gen)
+                await db.commit()
+                await db.refresh(image_gen)
+                return image_gen
+
+        await db.commit()
+        await db.refresh(image_gen)
+        logger.info(
+            f"Image-to-image {image_gen.id} generated for user {user_id}, "
+            f"status={image_gen.status}"
+        )
+        return image_gen
+
     async def get_by_id(self, db: AsyncSession, image_id: int, user_id: int) -> ImageGeneration:
         result = await db.execute(
             select(ImageGeneration).where(
