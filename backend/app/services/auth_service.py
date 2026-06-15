@@ -25,7 +25,7 @@ class AuthService:
         pass
 
     async def register(self, db: AsyncSession, data: UserRegister) -> User:
-        # Check if user already exists
+        # Check duplicate
         existing = await db.execute(
             select(User).where(
                 (User.email == data.email) | (User.username == data.username)
@@ -37,16 +37,28 @@ class AuthService:
                 detail="Email or username already registered"
             )
 
-        # Generate referral code
         referral_code = f"REF{secrets.token_hex(4).upper()}"
 
-        # Create user
+        # Create user with 0 credits; grant via ledger so totals stay consistent
         user = User(
             email=data.email,
             username=data.username,
             hashed_password=get_password_hash(data.password),
             referral_code=referral_code,
-            credits=settings.FREE_CREDITS_ON_REGISTER,
+            credits=0,
+        )
+        db.add(user)
+        await db.flush()  # populate user.id
+
+        # Local import to avoid circular: credit_service -> models -> user
+        from app.services.credit_service import credit_service
+        from app.models.credit_transaction import (
+            TX_REGISTER_BONUS, TX_REFERRAL_BONUS,
+        )
+
+        await credit_service.grant(
+            db, user.id, settings.FREE_CREDITS_ON_REGISTER,
+            type=TX_REGISTER_BONUS, note="register bonus",
         )
 
         # Handle referral
@@ -55,11 +67,15 @@ class AuthService:
                 select(User).where(User.referral_code == data.referral_code)
             )
             referrer = result.scalar_one_or_none()
-            if referrer:
+            if referrer and referrer.id != user.id:
                 user.referred_by = referrer.id
-                referrer.credits += settings.REFERRAL_BONUS
+                await credit_service.grant(
+                    db, referrer.id, settings.REFERRAL_BONUS,
+                    type=TX_REFERRAL_BONUS,
+                    ref_type="user", ref_id=user.id,
+                    note=f"referred {user.email}",
+                )
 
-        db.add(user)
         await db.commit()
         await db.refresh(user)
         logger.info(f"User registered: {user.email} (id={user.id})")

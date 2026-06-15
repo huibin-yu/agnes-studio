@@ -163,3 +163,30 @@ async def test_rate_limit_login(client: AsyncClient):
         "password": "SecurePass123!",
     })
     assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_register_writes_register_bonus_ledger(db):
+    """Register via service directly and verify ledger entry exists."""
+    from app.models.credit_transaction import (
+        CreditTransaction, TX_REGISTER_BONUS,
+    )
+    from app.models.user import User
+    from app.schemas.auth import UserRegister
+    from app.services.auth_service import auth_service
+    from sqlalchemy import select
+
+    data = UserRegister(
+        email="ledger@example.com",
+        username="ledgeruser",
+        password="SecurePass123!",
+    )
+    user = await auth_service.register(db, data)
+
+    txs = (await db.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user.id)
+    )).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].type == TX_REGISTER_BONUS
+    assert txs[0].amount == 10
+    assert txs[0].balance_after == 10
