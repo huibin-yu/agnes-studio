@@ -1,16 +1,17 @@
 /**
  * Image Generation Page
- * Based on official Agnes AI documentation
+ * Supports: text-to-image and image-to-image (with reference image)
  * https://agnes-ai.com/doc/overview
  */
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { useDropzone } from 'react-dropzone'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, Image as ImageIcon, Sparkles, Download, Share2, Wand2 } from 'lucide-react'
+import { Loader2, Image as ImageIcon, Sparkles, Download, Share2, Wand2, Upload, X } from 'lucide-react'
 import { useGenerationStore } from '@/stores/generation'
 import { api } from '@/lib/api'
 import { IMAGE_MODELS, IMAGE_SIZES, IMAGE_STYLES } from '@/lib/image-constants'
@@ -42,7 +43,7 @@ const IMAGE_USE_CASES = [
     description: '横版商品展示，适合电商与落地页',
     model: 'agnes-image-2.1-flash',
     size: '1024x768',
-    style: 'photographic',
+    style: 'realistic',
   },
   {
     id: 'poster',
@@ -69,9 +70,15 @@ export default function ImageGenerationPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [result, setResult] = useState<ImageResult | null>(null)
   const [error, setError] = useState('')
-  
+
+  // img2img state
+  const [referenceFile, setReferenceFile] = useState<File | null>(null)
+  const [referencePreview, setReferencePreview] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+
   const { addGeneration } = useGenerationStore()
   const estimatedCredits = estimateImageCredits(selectedSize, selectedModel)
+  const isImg2Img = referenceFile !== null
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -82,6 +89,39 @@ export default function ImageGenerationPage() {
     if (nextStyle) setSelectedStyle(nextStyle)
     if (nextSize) setSelectedSize(nextSize)
   }, [])
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    const file = acceptedFiles[0]
+    if (!file) return
+    setReferenceFile(file)
+    const reader = new FileReader()
+    reader.onload = () => setReferencePreview(reader.result as string)
+    reader.readAsDataURL(file)
+    setError('')
+  }, [])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp'] },
+    maxSize: 10 * 1024 * 1024,
+    multiple: false,
+    noClick: false,
+  })
+
+  const removeReference = () => {
+    setReferenceFile(null)
+    setReferencePreview(null)
+  }
+
+  const uploadReferenceImage = async (file: File): Promise<string> => {
+    const formData = new FormData()
+    formData.append('image', file)
+    const resp = await api.post('/images/upload-reference', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
+    return resp.data.image_url
+  }
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -94,13 +134,38 @@ export default function ImageGenerationPage() {
     setResult(null)
 
     try {
-      const response = await api.post('/images/generate', {
-        prompt: prompt.trim(),
-        model: selectedModel,
-        size: selectedSize,
-        style: selectedStyle,
-        negative_prompt: negativePrompt || undefined,
-      })
+      let response
+
+      if (isImg2Img && referenceFile) {
+        // Step 1: Upload reference image
+        setIsUploading(true)
+        let referenceUrl: string
+        try {
+          referenceUrl = await uploadReferenceImage(referenceFile)
+        } catch (uploadErr: unknown) {
+          const axiosErr = uploadErr as { response?: { data?: { detail?: string } } }
+          throw new Error(axiosErr.response?.data?.detail || '参考图上传失败')
+        } finally {
+          setIsUploading(false)
+        }
+
+        // Step 2: Call img2img endpoint
+        response = await api.post('/images/img2img', {
+          prompt: prompt.trim(),
+          image_url: referenceUrl,
+          model: selectedModel,
+          size: selectedSize,
+        })
+      } else {
+        // Text-to-image
+        response = await api.post('/images/generate', {
+          prompt: prompt.trim(),
+          model: selectedModel,
+          size: selectedSize,
+          style: selectedStyle,
+          negative_prompt: negativePrompt || undefined,
+        })
+      }
 
       setResult(response.data)
       addGeneration({
@@ -112,10 +177,11 @@ export default function ImageGenerationPage() {
         createdAt: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setError(axiosErr.response?.data?.detail || '图片生成失败，请重试')
+      const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string }
+      setError(axiosErr.response?.data?.detail || axiosErr.message || '图片生成失败，请重试')
     } finally {
       setIsGenerating(false)
+      setIsUploading(false)
     }
   }
 
@@ -150,13 +216,14 @@ export default function ImageGenerationPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ImageIcon className="h-6 w-6" />
-            AI Image Generation
+            AI 图片生成
           </CardTitle>
           <CardDescription>
-            Powered by Agnes AI • {selectedModel}
+            Powered by Agnes AI · {isImg2Img ? '图生图模式' : '文生图模式'} · {selectedModel}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Quick Presets */}
           <div>
             <label className="text-sm font-medium">参数预设</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
@@ -192,13 +259,69 @@ export default function ImageGenerationPage() {
             </div>
           </div>
 
+          {/* Reference Image Upload (img2img) */}
+          <div>
+            <label className="text-sm font-medium">
+              参考图片
+              <span className="text-muted-foreground font-normal ml-2">（可选，上传后进入图生图模式）</span>
+            </label>
+            {referencePreview ? (
+              <div className="mt-2 relative rounded-lg border overflow-hidden">
+                <img
+                  src={referencePreview}
+                  alt="参考图片"
+                  className="max-h-48 mx-auto object-contain"
+                />
+                <div className="absolute top-2 right-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 w-7 p-0 bg-black/50 hover:bg-black/70 text-white border-0"
+                    onClick={removeReference}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="px-3 py-2 bg-muted/50 text-xs text-muted-foreground flex items-center justify-between">
+                  <span>{referenceFile?.name}</span>
+                  <span>{((referenceFile?.size || 0) / 1024).toFixed(0)} KB</span>
+                </div>
+              </div>
+            ) : (
+              <div
+                {...getRootProps()}
+                className={`mt-2 rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+                  isDragActive
+                    ? 'border-primary bg-primary/5'
+                    : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30'
+                }`}
+              >
+                <input {...getInputProps()} />
+                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  {isDragActive ? '松开上传图片' : '拖拽图片到此处，或点击选择'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">支持 JPG、PNG、GIF、WebP，最大 10MB</p>
+              </div>
+            )}
+          </div>
+
           {/* Prompt Input */}
           <div>
-            <label className="text-sm font-medium">Prompt</label>
+            <label className="text-sm font-medium">
+              Prompt
+              {isImg2Img && (
+                <span className="text-muted-foreground font-normal ml-2">（描述对参考图的修改要求）</span>
+              )}
+            </label>
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="A majestic dragon flying over a medieval castle at sunset"
+              placeholder={
+                isImg2Img
+                  ? '例如：将背景改为海边日落，保持人物不变'
+                  : 'A majestic dragon flying over a medieval castle at sunset'
+              }
               rows={4}
               className="mt-1"
             />
@@ -214,19 +337,21 @@ export default function ImageGenerationPage() {
             </Button>
           </div>
 
-          {/* Negative Prompt */}
-          <div>
-            <label className="text-sm font-medium">Negative Prompt (optional)</label>
-            <Textarea
-              value={negativePrompt}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              placeholder="blurry, low quality, distorted"
-              rows={2}
-              className="mt-1"
-            />
-          </div>
+          {/* Negative Prompt (only for text-to-image) */}
+          {!isImg2Img && (
+            <div>
+              <label className="text-sm font-medium">Negative Prompt (optional)</label>
+              <Textarea
+                value={negativePrompt}
+                onChange={(e) => setNegativePrompt(e.target.value)}
+                placeholder="blurry, low quality, distorted"
+                rows={2}
+                className="mt-1"
+              />
+            </div>
+          )}
 
-          {/* Model Selection */}
+          {/* Model & Size */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-medium">Model</label>
@@ -243,8 +368,6 @@ export default function ImageGenerationPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Size Selection */}
             <div>
               <label className="text-sm font-medium">Size</label>
               <Select value={selectedSize} onValueChange={setSelectedSize}>
@@ -262,28 +385,32 @@ export default function ImageGenerationPage() {
             </div>
           </div>
 
-          {/* Style Selection */}
-          <div>
-            <label className="text-sm font-medium">Style (optional)</label>
-            <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-              <SelectTrigger className="mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {IMAGE_STYLES.map((style) => (
-                  <SelectItem key={style.id} value={style.id}>
-                    {style.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Style Selection (only for text-to-image) */}
+          {!isImg2Img && (
+            <div>
+              <label className="text-sm font-medium">Style (optional)</label>
+              <Select value={selectedStyle} onValueChange={setSelectedStyle}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {IMAGE_STYLES.map((style) => (
+                    <SelectItem key={style.id} value={style.id}>
+                      {style.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Cost Estimate */}
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+            预计消耗：<span className="font-medium text-foreground">{estimatedCredits}</span> 积分 · {selectedSize} · {selectedModel}
+            {isImg2Img && <span className="ml-2 text-primary">· 图生图</span>}
           </div>
 
           {/* Generate Button */}
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            预计消耗：<span className="font-medium text-foreground">{estimatedCredits}</span> 积分 · {selectedSize} · {selectedModel}
-          </div>
-
           <Button
             onClick={handleGenerate}
             disabled={isGenerating || !prompt.trim()}
@@ -292,12 +419,12 @@ export default function ImageGenerationPage() {
             {isGenerating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                生成中...
+                {isUploading ? '上传参考图中...' : '生成中...'}
               </>
             ) : (
               <>
                 <Sparkles className="mr-2 h-4 w-4" />
-                生成图片
+                {isImg2Img ? '图生图' : '生成图片'}
               </>
             )}
           </Button>

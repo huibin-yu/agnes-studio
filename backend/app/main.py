@@ -82,6 +82,11 @@ generated_dir = Path("generated")
 generated_dir.mkdir(exist_ok=True)
 app.mount("/generated", StaticFiles(directory=str(generated_dir)), name="generated")
 
+# Static files for uploads (reference images, etc.)
+uploads_dir = Path(settings.UPLOAD_DIR)
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
 # API Routes
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(images.router, prefix="/api/images", tags=["images"])

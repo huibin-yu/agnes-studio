@@ -2,7 +2,7 @@ export const VIDEO_MODEL = 'agnes-video-v2.0'
 
 export const VALID_FRAME_COUNTS = [81, 121, 161, 241, 441]
 
-export const VALID_FRAME_RATES = [12, 16, 24, 30, 60]
+export const VALID_FRAME_RATES = [16, 24, 30, 60]
 
 export const VIDEO_DURATIONS = [
   { id: 1, label: '3s (81 frames @ 24fps)', frames: 81, fps: 24 },
