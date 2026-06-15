@@ -56,6 +56,7 @@ class VideoGenerateResponse(BaseModel):
     frame_rate: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    credits_charged: int = 0
     created_at: datetime
 
     class Config:

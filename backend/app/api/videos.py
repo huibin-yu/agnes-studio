@@ -43,6 +43,7 @@ def _video_generate_response(video: Any) -> dict:
         "frame_rate": _video_value(video, "frame_rate"),
         "width": _video_value(video, "width"),
         "height": _video_value(video, "height"),
+        "credits_charged": _video_value(video, "credits_charged", 0),
         "created_at": _video_value(video, "created_at"),
     }
 

@@ -1,12 +1,16 @@
 """Video Service - Handles video generation based on official Agnes AI documentation"""
 import logging
+import math
 import time
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from fastapi import HTTPException, status as http_status
+from app.core.config import settings
 from app.core.database import async_session
 from app.schemas.video import VALID_FRAME_COUNTS, VALID_FRAME_RATES
 from app.services.agnes_ai import agnes_service
+from app.models.user import User
 from app.models.video import VideoGeneration
 from datetime import datetime, timedelta, timezone
 
@@ -22,25 +26,6 @@ class VideoService:
                           image: str = None, extra_images: list = None,
                           width: int = 1152, height: int = 768,
                           negative_prompt: str = None) -> Dict:
-        """
-        Create a video generation task
-
-        Args:
-            db: Database session
-            user_id: User ID
-            prompt: Video prompt
-            num_frames: Number of frames (8n+1, max 441)
-            frame_rate: Frame rate (1-60)
-            mode: Generation mode
-            image: Input image URL for image-to-video
-            extra_images: Additional images for multi-image mode
-            width: Video width
-            height: Video height
-            negative_prompt: Negative prompt
-
-        Returns:
-            Dict with video generation info
-        """
         # Validate frame count
         if num_frames not in VALID_FRAME_COUNTS:
             raise ValueError(f"Invalid num_frames: {num_frames}. Must be one of {VALID_FRAME_COUNTS}")
@@ -49,7 +34,23 @@ class VideoService:
         if frame_rate not in VALID_FRAME_RATES:
             raise ValueError(f"Invalid frame_rate: {frame_rate}. Must be one of {VALID_FRAME_RATES}")
 
-        # Create database record
+        # Calculate cost (ceil duration * per-second rate)
+        duration = num_frames / frame_rate
+        cost = math.ceil(duration * settings.VIDEO_COST_PER_SECOND)
+
+        # Load user and check balance
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if user.credits < cost:
+            raise HTTPException(
+                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits. Please recharge.",
+            )
+
+        # Create database record (queued)
         video_gen = VideoGeneration(
             user_id=user_id,
             prompt=prompt,
@@ -58,7 +59,7 @@ class VideoService:
             width=width,
             height=height,
             status="queued",
-            progress=0
+            progress=0,
         )
         db.add(video_gen)
         await db.commit()
@@ -82,39 +83,46 @@ class VideoService:
                 frame_rate=frame_rate,
                 height=height,
                 width=width,
-                negative_prompt=negative_prompt
+                negative_prompt=negative_prompt,
             )
-
-            # Store task info
-            video_gen.task_id = api_response.get("id") or api_response.get("task_id")
-            video_gen.video_id = api_response.get("video_id")
-            video_gen.status = api_response.get("status", "queued")
-            video_gen.progress = api_response.get("progress", 0)
-
-            await db.commit()
-            logger.info(f"Video task created for user {user_id}, video_id={video_gen.video_id}")
-
-            return {
-                "id": video_gen.id,
-                "task_id": video_gen.task_id,
-                "video_id": video_gen.video_id,
-                "status": video_gen.status,
-                "progress": video_gen.progress,
-                "prompt": prompt,
-                "estimated_time": 300,  # 5 minutes estimate
-                "video_url": video_gen.video_url,
-                "num_frames": video_gen.num_frames,
-                "frame_rate": video_gen.frame_rate,
-                "width": video_gen.width,
-                "height": video_gen.height,
-                "created_at": video_gen.created_at,
-            }
         except Exception as e:
             video_gen.status = "failed"
             video_gen.error_message = "Video task creation failed"
             await db.commit()
             logger.error(f"Failed to create video task for user {user_id}: {e}")
             raise Exception("Failed to create video task. Please try again later.")
+
+        # Upstream succeeded -> charge credits
+        video_gen.task_id = api_response.get("id") or api_response.get("task_id")
+        video_gen.video_id = api_response.get("video_id")
+        video_gen.status = api_response.get("status", "queued")
+        video_gen.progress = api_response.get("progress", 0)
+        video_gen.credits_charged = cost
+        user.credits -= cost
+        await db.commit()
+        await db.refresh(video_gen)
+
+        logger.info(
+            f"Video task created for user {user_id}, video_id={video_gen.video_id}, "
+            f"charged {cost} credits, balance: {user.credits}"
+        )
+
+        return {
+            "id": video_gen.id,
+            "task_id": video_gen.task_id,
+            "video_id": video_gen.video_id,
+            "status": video_gen.status,
+            "progress": video_gen.progress,
+            "prompt": prompt,
+            "estimated_time": 300,
+            "video_url": video_gen.video_url,
+            "num_frames": video_gen.num_frames,
+            "frame_rate": video_gen.frame_rate,
+            "width": video_gen.width,
+            "height": video_gen.height,
+            "credits_charged": video_gen.credits_charged,
+            "created_at": video_gen.created_at,
+        }
 
     async def poll_video_status(self, db: AsyncSession, video_id: str,
                                user_id: int = None) -> Dict:

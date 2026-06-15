@@ -22,8 +22,8 @@ class VideoGeneration(Base):
     style = Column(String(100), default="cinematic")
 
     # Task IDs from Agnes API
-    task_id = Column(String(200), nullable=False)
-    video_id = Column(String(500), nullable=False, index=True)
+    task_id = Column(String(200), nullable=True)
+    video_id = Column(String(500), nullable=True, index=True)
 
     # Output
     video_url = Column(String(500), default=None)
