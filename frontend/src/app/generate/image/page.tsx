@@ -55,10 +55,9 @@ const IMAGE_USE_CASES = [
   },
 ]
 
-function estimateImageCredits(size: string, model: string) {
-  const sizeMultiplier = size.startsWith('4096') ? 8 : size.startsWith('2048') ? 3 : 1
-  const modelMultiplier = model.includes('2.1') ? 1.2 : 1
-  return Math.ceil(10 * sizeMultiplier * modelMultiplier)
+function estimateImageCredits() {
+  // Backend charges a flat IMAGE_COST (1 credit) per image regardless of size/model
+  return 1
 }
 
 export default function ImageGenerationPage() {
@@ -77,7 +76,7 @@ export default function ImageGenerationPage() {
   const [isUploading, setIsUploading] = useState(false)
 
   const { addGeneration } = useGenerationStore()
-  const estimatedCredits = estimateImageCredits(selectedSize, selectedModel)
+  const estimatedCredits = estimateImageCredits()
   const isImg2Img = referenceFile !== null
 
   useEffect(() => {

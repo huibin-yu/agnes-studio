@@ -45,7 +45,7 @@ const VIDEO_USE_CASES = [
 
 function estimateVideoCredits(frames: number, fps: number) {
   const duration = frames / fps
-  return Math.ceil(duration * 18)
+  return Math.ceil(duration * 2)
 }
 
 export default function VideoGenerationPage() {

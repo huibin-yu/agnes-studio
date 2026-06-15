@@ -27,6 +27,7 @@ class GalleryItemResponse(BaseModel):
     is_public: bool
     likes: int
     views: int
+    is_liked: bool = False
     user: "GalleryUser"
     created_at: datetime
 
