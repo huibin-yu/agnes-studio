@@ -92,13 +92,32 @@ class VideoService:
             logger.error(f"Failed to create video task for user {user_id}: {e}")
             raise Exception("Failed to create video task. Please try again later.")
 
-        # Upstream succeeded -> charge credits
+        # Upstream succeeded -> charge credits via ledger
         video_gen.task_id = api_response.get("id") or api_response.get("task_id")
         video_gen.video_id = api_response.get("video_id")
         video_gen.status = api_response.get("status", "queued")
         video_gen.progress = api_response.get("progress", 0)
+
+        from app.services.credit_service import credit_service, InsufficientCreditsError
+        from app.models.credit_transaction import TX_VIDEO_GENERATE
+
+        try:
+            await credit_service.charge(
+                db, user_id, cost,
+                type=TX_VIDEO_GENERATE,
+                ref_type="video", ref_id=video_gen.id,
+            )
+        except InsufficientCreditsError:
+            await db.rollback()
+            logger.error(
+                f"Race: insufficient credits for user {user_id} after upstream "
+                f"created video task. video_id={video_gen.video_id}"
+            )
+            raise HTTPException(
+                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits at charge time. Please retry.",
+            )
         video_gen.credits_charged = cost
-        user.credits -= cost
         await db.commit()
         await db.refresh(video_gen)
 

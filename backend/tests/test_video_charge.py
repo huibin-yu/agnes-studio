@@ -113,3 +113,42 @@ async def test_video_create_upstream_failure_does_not_charge(db, monkeypatch):
 
     refreshed = (await db.execute(select(User).where(User.id == user.id))).scalar_one()
     assert refreshed.credits == 100  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_video_create_writes_ledger_entry(db, monkeypatch):
+    from app.models.credit_transaction import CreditTransaction, TX_VIDEO_GENERATE
+
+    user = User(
+        email="vid-led@example.com",
+        username="vidled",
+        hashed_password="x",
+        credits=100,
+        referral_code="REFVLED",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    async def fake_create_task(**kwargs):
+        return {
+            "id": "task-led", "task_id": "task-led",
+            "video_id": "vid-led", "status": "queued", "progress": 0,
+        }
+    monkeypatch.setattr(
+        "app.services.video_service.agnes_service.create_video_task",
+        fake_create_task,
+    )
+
+    result = await video_service.create_video(
+        db=db, user_id=user.id, prompt="p",
+        num_frames=121, frame_rate=24,
+    )
+
+    txs = (await db.execute(
+        select(CreditTransaction).where(CreditTransaction.user_id == user.id)
+    )).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].type == TX_VIDEO_GENERATE
+    assert txs[0].amount == -result["credits_charged"]
+    assert txs[0].ref_id == result["id"]
