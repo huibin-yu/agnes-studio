@@ -63,10 +63,17 @@ class ImageService:
             image_gen.error_message = "Image generation returned no result"
 
         db.add(image_gen)
-        user.credits -= settings.IMAGE_COST
+
+        # Only charge on success
+        if image_url:
+            user.credits -= settings.IMAGE_COST
+
         await db.commit()
         await db.refresh(image_gen)
-        logger.info(f"Image {image_gen.id} generated for user {user_id}, credits remaining: {user.credits}")
+        logger.info(
+            f"Image {image_gen.id} generated for user {user_id}, "
+            f"status={image_gen.status}, credits remaining: {user.credits}"
+        )
         return image_gen
 
     async def get_by_id(self, db: AsyncSession, image_id: int, user_id: int) -> ImageGeneration:
