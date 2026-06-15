@@ -19,6 +19,35 @@ import { VIDEO_PROMPT_TEMPLATES, enhanceVideoPrompt } from '@/lib/prompt-tools'
 
 const MAX_POLL_ATTEMPTS = 120 // 10 minutes at 5s intervals
 
+const VIDEO_USE_CASES = [
+  {
+    id: 'short-opening',
+    name: '短视频开场',
+    description: '5 秒以内，适合社媒开头和封面动态',
+    frames: 81,
+    fps: 24,
+  },
+  {
+    id: 'product-loop',
+    name: '产品展示',
+    description: '5 秒商品转场和材质特写',
+    frames: 121,
+    fps: 24,
+  },
+  {
+    id: 'story-shot',
+    name: '剧情镜头',
+    description: '10 秒叙事镜头，适合短片片段',
+    frames: 241,
+    fps: 24,
+  },
+]
+
+function estimateVideoCredits(frames: number, fps: number) {
+  const duration = frames / fps
+  return Math.ceil(duration * 18)
+}
+
 export default function VideoGenerationPage() {
   const [prompt, setPrompt] = useState('')
   const [numFrames, setNumFrames] = useState(121)
@@ -33,6 +62,7 @@ export default function VideoGenerationPage() {
   const lastPollTimeRef = useRef(0)
 
   const { addGeneration } = useGenerationStore()
+  const estimatedCredits = estimateVideoCredits(numFrames, frameRate)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -122,6 +152,13 @@ export default function VideoGenerationPage() {
     }
   }
 
+  const applyUseCase = (useCaseId: string) => {
+    const useCase = VIDEO_USE_CASES.find((item) => item.id === useCaseId)
+    if (!useCase) return
+    setNumFrames(useCase.frames)
+    setFrameRate(useCase.fps)
+  }
+
   const applyTemplate = (templateId: string) => {
     const template = VIDEO_PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
@@ -152,6 +189,23 @@ export default function VideoGenerationPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div>
+            <label className="text-sm font-medium">参数预设</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+              {VIDEO_USE_CASES.map((useCase) => (
+                <button
+                  key={useCase.id}
+                  type="button"
+                  onClick={() => applyUseCase(useCase.id)}
+                  className="text-left rounded-lg border p-3 hover:border-primary hover:bg-muted/50 transition-colors"
+                >
+                  <div className="text-sm font-medium">{useCase.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{useCase.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Prompt Templates */}
           <div>
             <label className="text-sm font-medium">创作模板</label>
@@ -250,7 +304,7 @@ export default function VideoGenerationPage() {
 
           {/* Duration Info */}
           <div className="text-sm text-muted-foreground">
-            预计时长: {durationSeconds} 秒
+            预计时长: {durationSeconds} 秒 · 预计消耗: <span className="font-medium text-foreground">{estimatedCredits}</span> 积分
           </div>
 
           {/* Generate Button */}
@@ -274,7 +328,14 @@ export default function VideoGenerationPage() {
 
           {/* Error Message */}
           {error && (
-            <div className="text-red-500 text-sm">{error}</div>
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div>{error}</div>
+              {prompt.trim() && (
+                <Button type="button" size="sm" variant="outline" className="mt-2" onClick={handleGenerate} disabled={isGenerating}>
+                  一键重试
+                </Button>
+              )}
+            </div>
           )}
 
           {/* Progress */}

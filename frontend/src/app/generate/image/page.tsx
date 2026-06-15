@@ -27,6 +27,39 @@ interface ImageResult {
   created_at: string
 }
 
+const IMAGE_USE_CASES = [
+  {
+    id: 'social-cover',
+    name: '社媒封面',
+    description: '方图，主体清晰，适合小红书/公众号封面',
+    model: 'agnes-image-2.1-flash',
+    size: '1024x1024',
+    style: 'realistic',
+  },
+  {
+    id: 'product-main',
+    name: '产品主图',
+    description: '横版商品展示，适合电商与落地页',
+    model: 'agnes-image-2.1-flash',
+    size: '1024x768',
+    style: 'photographic',
+  },
+  {
+    id: 'poster',
+    name: '竖版海报',
+    description: '竖版构图，适合活动、课程、营销视觉',
+    model: 'agnes-image-2.1-flash',
+    size: '1024x1816',
+    style: 'digital-art',
+  },
+]
+
+function estimateImageCredits(size: string, model: string) {
+  const sizeMultiplier = size.startsWith('4096') ? 8 : size.startsWith('2048') ? 3 : 1
+  const modelMultiplier = model.includes('2.1') ? 1.2 : 1
+  return Math.ceil(10 * sizeMultiplier * modelMultiplier)
+}
+
 export default function ImageGenerationPage() {
   const [prompt, setPrompt] = useState('')
   const [selectedModel, setSelectedModel] = useState('agnes-image-2.1-flash')
@@ -38,6 +71,7 @@ export default function ImageGenerationPage() {
   const [error, setError] = useState('')
   
   const { addGeneration } = useGenerationStore()
+  const estimatedCredits = estimateImageCredits(selectedSize, selectedModel)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -51,7 +85,7 @@ export default function ImageGenerationPage() {
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
-      setError('Please enter a prompt')
+      setError('请输入提示词')
       return
     }
 
@@ -79,10 +113,18 @@ export default function ImageGenerationPage() {
       })
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setError(axiosErr.response?.data?.detail || 'Failed to generate image')
+      setError(axiosErr.response?.data?.detail || '图片生成失败，请重试')
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const applyUseCase = (useCaseId: string) => {
+    const useCase = IMAGE_USE_CASES.find((item) => item.id === useCaseId)
+    if (!useCase) return
+    setSelectedModel(useCase.model)
+    setSelectedSize(useCase.size)
+    setSelectedStyle(useCase.style)
   }
 
   const applyTemplate = (templateId: string) => {
@@ -95,7 +137,7 @@ export default function ImageGenerationPage() {
 
   const handleEnhancePrompt = () => {
     if (!prompt.trim()) {
-      setError('Please enter a prompt first')
+      setError('请先输入提示词')
       return
     }
     setPrompt(enhanceImagePrompt(prompt, selectedStyle))
@@ -115,6 +157,23 @@ export default function ImageGenerationPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div>
+            <label className="text-sm font-medium">参数预设</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+              {IMAGE_USE_CASES.map((useCase) => (
+                <button
+                  key={useCase.id}
+                  type="button"
+                  onClick={() => applyUseCase(useCase.id)}
+                  className="text-left rounded-lg border p-3 hover:border-primary hover:bg-muted/50 transition-colors"
+                >
+                  <div className="text-sm font-medium">{useCase.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{useCase.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Prompt Templates */}
           <div>
             <label className="text-sm font-medium">创作模板</label>
@@ -221,6 +280,10 @@ export default function ImageGenerationPage() {
           </div>
 
           {/* Generate Button */}
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+            预计消耗：<span className="font-medium text-foreground">{estimatedCredits}</span> 积分 · {selectedSize} · {selectedModel}
+          </div>
+
           <Button
             onClick={handleGenerate}
             disabled={isGenerating || !prompt.trim()}
@@ -229,19 +292,26 @@ export default function ImageGenerationPage() {
             {isGenerating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Generating...
+                生成中...
               </>
             ) : (
               <>
                 <Sparkles className="mr-2 h-4 w-4" />
-                Generate Image
+                生成图片
               </>
             )}
           </Button>
 
           {/* Error Message */}
           {error && (
-            <div className="text-red-500 text-sm">{error}</div>
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div>{error}</div>
+              {prompt.trim() && (
+                <Button type="button" size="sm" variant="outline" className="mt-2" onClick={handleGenerate} disabled={isGenerating}>
+                  一键重试
+                </Button>
+              )}
+            </div>
           )}
 
           {/* Result */}

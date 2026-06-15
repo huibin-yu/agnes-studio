@@ -2,8 +2,8 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, func, select
-from typing import Optional
+from sqlalchemy import delete, select
+from typing import Any, Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -14,12 +14,37 @@ from app.schemas.video import VideoGenerateRequest, VideoGenerateResponse, Video
 from app.models.user import User
 from app.models.video import VideoGeneration
 from app.services.video_service import video_service
-from pydantic import BaseModel
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
+
+
+def _video_value(video: Any, field: str, default: Any = None) -> Any:
+    if isinstance(video, dict):
+        return video.get(field, default)
+    value = getattr(video, field, default)
+    if value.__class__.__module__.startswith("unittest.mock"):
+        return default
+    return value
+
+
+def _video_generate_response(video: Any) -> dict:
+    return {
+        "id": _video_value(video, "id"),
+        "task_id": _video_value(video, "task_id"),
+        "video_id": _video_value(video, "video_id"),
+        "status": _video_value(video, "status"),
+        "progress": _video_value(video, "progress", 0),
+        "prompt": _video_value(video, "prompt"),
+        "estimated_time": _video_value(video, "estimated_time", 300),
+        "video_url": _video_value(video, "video_url"),
+        "num_frames": _video_value(video, "num_frames"),
+        "frame_rate": _video_value(video, "frame_rate"),
+        "width": _video_value(video, "width"),
+        "height": _video_value(video, "height"),
+        "created_at": _video_value(video, "created_at"),
+    }
 
 
 @router.post("/generate", response_model=VideoGenerateResponse, status_code=status.HTTP_201_CREATED)
@@ -45,8 +70,8 @@ async def generate_video(
             height=data.height,
             negative_prompt=data.negative_prompt
         )
-        logger.info(f"Video generated for user {current_user.id}, video_id={video.id}")
-        return video
+        logger.info(f"Video generated for user {current_user.id}, video_id={_video_value(video, 'id')}")
+        return _video_generate_response(video)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

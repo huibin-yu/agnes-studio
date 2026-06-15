@@ -59,6 +59,7 @@ class ImageGenerateResponse(BaseModel):
     status: str
     seed: Optional[int]
     size: str
+    style: Optional[str] = None
     created_at: datetime
 
     class Config:

@@ -1,3 +1,13 @@
+<!-- DREAMFIELD_README_HEADER_START -->
+
+<p align="center">
+  <a href="https://www.dreamfield.top">
+      <img src="https://www.dreamfield.top/dream-field/contest-readme/assets/dreamseed-readme-banner.png" alt="DreamSeed 种梦计划参赛作品" width="100%" />
+  </a>
+</p>
+
+<!-- DREAMFIELD_README_HEADER_END -->
+
 # Agnes Studio - AI 生图生视频平台
 
 基于 Agnes AI API 构建的生产级生图生视频网站。

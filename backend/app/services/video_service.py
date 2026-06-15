@@ -101,7 +101,13 @@ class VideoService:
                 "status": video_gen.status,
                 "progress": video_gen.progress,
                 "prompt": prompt,
-                "estimated_time": 300  # 5 minutes estimate
+                "estimated_time": 300,  # 5 minutes estimate
+                "video_url": video_gen.video_url,
+                "num_frames": video_gen.num_frames,
+                "frame_rate": video_gen.frame_rate,
+                "width": video_gen.width,
+                "height": video_gen.height,
+                "created_at": video_gen.created_at,
             }
         except Exception as e:
             video_gen.status = "failed"

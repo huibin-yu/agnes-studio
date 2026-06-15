@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { ArrowLeft, Download, Heart, Image as ImageIcon, Loader2, Sparkles, Video } from "lucide-react"
+import { ArrowLeft, Bookmark, Check, Copy, Download, Heart, Image as ImageIcon, Loader2, Sparkles, Video } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { api } from "@/lib/api"
+
+const FAVORITE_STORAGE_KEY = "agnes-gallery-favorites"
 
 interface GalleryItem {
   id: number
@@ -33,6 +35,8 @@ export default function GalleryDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [liking, setLiking] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [favorited, setFavorited] = useState(false)
 
   useEffect(() => {
     const fetchItem = async () => {
@@ -50,6 +54,15 @@ export default function GalleryDetailPage() {
     fetchItem()
   }, [params.id])
 
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAVORITE_STORAGE_KEY) || "[]") as number[]
+      setFavorited(saved.includes(Number(params.id)))
+    } catch {
+      setFavorited(false)
+    }
+  }, [params.id])
+
   const likeItem = async () => {
     if (!item) return
     setLiking(true)
@@ -60,6 +73,31 @@ export default function GalleryDetailPage() {
       setError("点赞失败，请登录后重试")
     } finally {
       setLiking(false)
+    }
+  }
+
+  const copyPrompt = async () => {
+    if (!item) return
+    try {
+      await navigator.clipboard.writeText(item.prompt)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setError("复制失败，请手动选择提示词")
+    }
+  }
+
+  const toggleFavorite = () => {
+    if (!item) return
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAVORITE_STORAGE_KEY) || "[]") as number[]
+      const next = saved.includes(item.id)
+        ? saved.filter((id) => id !== item.id)
+        : [...saved, item.id]
+      localStorage.setItem(FAVORITE_STORAGE_KEY, JSON.stringify(next))
+      setFavorited(next.includes(item.id))
+    } catch {
+      setError("收藏失败，请检查浏览器存储权限")
     }
   }
 
@@ -126,6 +164,10 @@ export default function GalleryDetailPage() {
             <div className="rounded-lg border p-4">
               <div className="text-sm font-medium mb-2">完整提示词</div>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{item.prompt}</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={copyPrompt}>
+                {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+                {copied ? "已复制" : "复制提示词"}
+              </Button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -154,6 +196,10 @@ export default function GalleryDetailPage() {
                   用同款生成
                 </Button>
               </Link>
+              <Button variant={favorited ? "default" : "outline"} onClick={toggleFavorite}>
+                <Bookmark className="w-4 h-4 mr-2" />
+                {favorited ? "已收藏" : "收藏"}
+              </Button>
               <Button variant="outline" onClick={likeItem} disabled={liking}>
                 {liking ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Heart className="w-4 h-4 mr-2" />}
                 {item.likes}
@@ -162,6 +208,11 @@ export default function GalleryDetailPage() {
                 <Download className="w-4 h-4 mr-2" />
                 下载
               </Button>
+              {item.style && (
+                <Link href={`/gallery?style=${encodeURIComponent(item.style)}`}>
+                  <Button variant="outline">同风格作品</Button>
+                </Link>
+              )}
             </div>
           </aside>
         </div>

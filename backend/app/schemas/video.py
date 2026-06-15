@@ -50,7 +50,12 @@ class VideoGenerateResponse(BaseModel):
     status: str
     progress: int
     prompt: str
-    estimated_time: int
+    estimated_time: int = 300
+    video_url: Optional[str] = None
+    num_frames: Optional[int] = None
+    frame_rate: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     created_at: datetime
 
     class Config:

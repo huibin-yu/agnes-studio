@@ -28,7 +28,7 @@ interface GalleryItem {
 }
 
 const STYLES = [
-  { value: "", label: "全部风格" },
+  { value: "all", label: "全部风格" },
   { value: "cinematic", label: "电影质感" },
   { value: "anime", label: "动漫" },
   { value: "realistic", label: "写实" },
@@ -43,7 +43,8 @@ export default function GalleryPage() {
   const [items, setItems] = useState<GalleryItem[]>([])
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [style, setStyle] = useState("")
+  const [style, setStyle] = useState("all")
+  const [tag, setTag] = useState("")
   const [sort, setSort] = useState("newest")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -60,7 +61,8 @@ export default function GalleryPage() {
     try {
       const params: Record<string, string | number> = { sort, per_page: 20 }
       if (debouncedQuery) params.query = debouncedQuery
-      if (style) params.style = style
+      if (style !== "all") params.style = style
+      if (tag) params.tags = tag
 
       const response = await api.get("/gallery/public", { params })
       setItems(response.data.items || [])
@@ -69,7 +71,15 @@ export default function GalleryPage() {
       setItems([])
     }
     setLoading(false)
-  }, [debouncedQuery, style, sort])
+  }, [debouncedQuery, style, tag, sort])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const nextStyle = params.get("style")
+    const nextTag = params.get("tag")
+    if (nextStyle) setStyle(nextStyle)
+    if (nextTag) setTag(nextTag)
+  }, [])
 
   useEffect(() => {
     fetchGallery()
@@ -109,6 +119,12 @@ export default function GalleryPage() {
               ))}
             </SelectContent>
           </Select>
+          <Input
+            value={tag}
+            onChange={(event) => setTag(event.target.value)}
+            placeholder="标签筛选"
+            className="sm:w-[160px]"
+          />
           <Select value={sort} onValueChange={setSort}>
             <SelectTrigger className="w-[140px]">
               <SelectValue />
@@ -157,6 +173,18 @@ export default function GalleryPage() {
                   <CardContent className="p-3">
                     <h3 className="text-sm font-medium truncate">{item.title}</h3>
                     <p className="text-xs text-muted-foreground truncate">{item.user?.username}</p>
+                    {item.style && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setStyle(item.style)
+                        }}
+                        className="mt-2 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        {item.style}
+                      </button>
+                    )}
                     <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Heart className="w-3 h-3" />
@@ -179,6 +207,18 @@ export default function GalleryPage() {
             <p className="text-muted-foreground">
               {debouncedQuery ? `没有找到 "${debouncedQuery}" 相关的作品` : "暂无作品，成为第一个创作者吧！"}
             </p>
+            {(style !== "all" || tag) && (
+              <Button
+                variant="outline"
+                className="mt-4 mr-2"
+                onClick={() => {
+                  setStyle("all")
+                  setTag("")
+                }}
+              >
+                清除筛选
+              </Button>
+            )}
             <Button className="mt-4" onClick={() => router.push("/generate/image")}>
               开始创作
             </Button>
