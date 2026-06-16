@@ -59,12 +59,64 @@ def _extract_video_url(payload: dict) -> Optional[str]:
 class VideoService:
     """Service for video generation workflow"""
 
+    async def _refund_if_needed(
+        self, db: AsyncSession, video_gen: VideoGeneration, reason: str
+    ) -> bool:
+        """Atomically refund credits for a video generation.
+
+        Uses an atomic UPDATE to claim the refund right, preventing concurrent
+        requests from double-refunding. Returns True if this caller performed
+        the refund, False if it was already handled.
+
+        Does NOT commit — caller controls transaction boundary.
+        """
+        from sqlalchemy import update as sa_update
+        from app.services.credit_service import credit_service
+        from app.models.credit_transaction import TX_VIDEO_REFUND
+
+        # Atomic claim: set credits_charged=0 only if still > 0
+        result = await db.execute(
+            sa_update(VideoGeneration)
+            .where(
+                VideoGeneration.id == video_gen.id,
+                VideoGeneration.credits_charged > 0,
+            )
+            .values(credits_charged=0)
+        )
+
+        if result.rowcount == 0:
+            logger.info(f"Video {video_gen.id}: refund skipped (already handled)")
+            return False
+
+        # We won the claim — grant the refund
+        refund_amount = video_gen.credits_charged  # ORM still holds old value
+        await credit_service.grant(
+            db, video_gen.user_id, refund_amount,
+            type=TX_VIDEO_REFUND,
+            ref_type="video", ref_id=video_gen.id,
+            note=reason,
+        )
+        video_gen.credits_charged = 0  # Sync ORM object
+        logger.info(f"Video {video_gen.id}: refunded {refund_amount} credits ({reason})")
+        return True
+
     async def create_video(self, db: AsyncSession, user_id: int,
                           prompt: str, num_frames: int = 121,
                           frame_rate: int = 24, mode: str = "ti2vid",
                           image: str = None, extra_images: list = None,
                           width: int = 1152, height: int = 768,
                           negative_prompt: str = None) -> Dict:
+        """Create a video generation task.
+
+        Transaction sequence (atomic except for the unrollable Agnes API call):
+          1. Validate inputs and pre-check balance (cheap UX guard)
+          2. Call Agnes AI API (NOT rollbackable — log as orphan on local failure)
+          3. Build VideoGeneration record + flush (in-session, not committed)
+          4. Charge credits via credit_service.charge()
+          5. Set credits_charged = cost
+          6. Single commit
+        On charge failure: rollback (drops local record) + ORPHANED TASK log.
+        """
         # Validate frame count
         if num_frames not in VALID_FRAME_COUNTS:
             raise ValueError(f"Invalid num_frames: {num_frames}. Must be one of {VALID_FRAME_COUNTS}")
@@ -77,7 +129,7 @@ class VideoService:
         duration = num_frames / frame_rate
         cost = math.ceil(duration * settings.VIDEO_COST_PER_SECOND)
 
-        # Load user and check balance
+        # === Stage 1: Pre-check balance (UX guard, non-authoritative) ===
         user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
         if not user:
@@ -89,29 +141,13 @@ class VideoService:
                 detail="Insufficient credits. Please recharge.",
             )
 
-        # Create database record (queued)
-        video_gen = VideoGeneration(
-            user_id=user_id,
-            prompt=prompt,
-            num_frames=num_frames,
-            frame_rate=frame_rate,
-            width=width,
-            height=height,
-            status="queued",
-            progress=0,
-        )
-        db.add(video_gen)
-        await db.commit()
-        await db.refresh(video_gen)
-
-        # Prepare extra_body for multi-image/keyframes mode
+        # === Stage 2: Call Agnes AI (NOT rollbackable) ===
         extra_body = {}
         if extra_images and len(extra_images) > 0:
             extra_body["image"] = extra_images
             if mode == "keyframes":
                 extra_body["mode"] = "keyframes"
 
-        # Call Agnes AI API to create video task
         try:
             api_response = await agnes_service.create_video_task(
                 prompt=prompt,
@@ -125,17 +161,30 @@ class VideoService:
                 negative_prompt=negative_prompt,
             )
         except Exception as e:
-            video_gen.status = "failed"
-            video_gen.error_message = "Video task creation failed"
-            await db.commit()
             logger.error(f"Failed to create video task for user {user_id}: {e}")
-            raise Exception("Failed to create video task. Please try again later.")
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Video service is temporarily unavailable. Please try again later.",
+            )
 
-        # Upstream succeeded -> charge credits via ledger
-        video_gen.task_id = api_response.get("id") or api_response.get("task_id")
-        video_gen.video_id = api_response.get("video_id")
-        video_gen.status = api_response.get("status", "queued")
-        video_gen.progress = api_response.get("progress", 0)
+        upstream_task_id = api_response.get("id") or api_response.get("task_id")
+        upstream_video_id = api_response.get("video_id")
+
+        # === Stage 3: Atomic record + charge (single transaction) ===
+        video_gen = VideoGeneration(
+            user_id=user_id,
+            prompt=prompt,
+            num_frames=num_frames,
+            frame_rate=frame_rate,
+            width=width,
+            height=height,
+            task_id=upstream_task_id,
+            video_id=upstream_video_id,
+            status=api_response.get("status", "queued"),
+            progress=api_response.get("progress", 0),
+        )
+        db.add(video_gen)
+        await db.flush()  # populate video_gen.id without committing
 
         from app.services.credit_service import credit_service, InsufficientCreditsError
         from app.models.credit_transaction import TX_VIDEO_GENERATE
@@ -149,20 +198,22 @@ class VideoService:
         except InsufficientCreditsError:
             await db.rollback()
             logger.error(
-                f"Race: insufficient credits for user {user_id} after upstream "
-                f"created video task. video_id={video_gen.video_id}"
+                f"ORPHANED TASK: user={user_id} task_id={upstream_task_id} "
+                f"video_id={upstream_video_id} cost={cost}. "
+                f"Agnes task created but credits not charged."
             )
             raise HTTPException(
                 status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Insufficient credits at charge time. Please retry.",
             )
+
         video_gen.credits_charged = cost
         await db.commit()
         await db.refresh(video_gen)
 
         logger.info(
             f"Video task created for user {user_id}, video_id={video_gen.video_id}, "
-            f"charged {cost} credits, balance: {user.credits}"
+            f"charged {cost} credits"
         )
 
         return {
@@ -213,19 +264,6 @@ class VideoService:
         upstream_status = api_response.get("status")
         progress = api_response.get("progress", 0)
 
-        from app.services.credit_service import credit_service
-        from app.models.credit_transaction import TX_VIDEO_REFUND
-
-        async def _refund_if_needed(reason: str):
-            if video_gen.credits_charged and video_gen.credits_charged > 0:
-                await credit_service.grant(
-                    db, video_gen.user_id, video_gen.credits_charged,
-                    type=TX_VIDEO_REFUND,
-                    ref_type="video", ref_id=video_gen.id,
-                    note=reason,
-                )
-                video_gen.credits_charged = 0
-
         video_gen.progress = progress
 
         error_message = None
@@ -243,14 +281,14 @@ class VideoService:
                 video_gen.status = "failed"
                 video_gen.error_message = "Upstream completed but no video URL"
                 error_message = video_gen.error_message
-                await _refund_if_needed("completed_no_url")
+                await self._refund_if_needed(db, video_gen, "completed_no_url")
                 upstream_status = "failed"
         elif upstream_status == "failed":
             err = api_response.get("error") or {}
             video_gen.status = "failed"
             video_gen.error_message = err.get("message", "Unknown error") if isinstance(err, dict) else str(err)
             error_message = video_gen.error_message
-            await _refund_if_needed("generation_failed")
+            await self._refund_if_needed(db, video_gen, "generation_failed")
         else:
             video_gen.status = upstream_status or video_gen.status
 

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAuthStore } from '@/stores/auth'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
@@ -51,11 +52,11 @@ api.interceptors.response.use(
             })
             const { access_token, refresh_token: newRefreshToken } = resp.data
 
-            // Update Zustand store
-            const state = parsed.state
-            state.accessToken = access_token
-            if (newRefreshToken) state.refreshToken = newRefreshToken
-            localStorage.setItem('auth-storage', JSON.stringify({ state, version: 0 }))
+            // Update Zustand store (notifies all subscribed components)
+            useAuthStore.getState().setAccessToken(access_token)
+            if (newRefreshToken) {
+              useAuthStore.getState().setRefreshToken(newRefreshToken)
+            }
 
             originalRequest.headers.Authorization = `Bearer ${access_token}`
             return api(originalRequest)

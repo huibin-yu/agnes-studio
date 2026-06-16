@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { Image, Video, Sparkles, Zap, Users, ArrowRight, Eye, Heart } from "lucide-react"
+import { Image, Video, Sparkles, Zap, Users, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 const features = [
@@ -38,14 +38,6 @@ const styles = [
   "科幻", "奇幻", "波普艺术", "极简主义",
 ]
 
-// TODO: Replace with real statistics from API
-const stats = [
-  { value: "100K+", label: "用户注册", icon: Users },
-  { value: "1M+", label: "图片生成", icon: Image },
-  { value: "50K+", label: "视频生成", icon: Video },
-  { value: "14+", label: "艺术风格", icon: Sparkles },
-]
-
 export default function HomePage() {
   return (
     <div className="min-h-screen">
@@ -65,7 +57,7 @@ export default function HomePage() {
           >
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
               <Zap className="w-4 h-4" />
-              Agnes AI 驱动 · 免费调用
+              Agnes AI 驱动 · 注册送积分
             </div>
 
             <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
@@ -113,25 +105,6 @@ export default function HomePage() {
               </span>
             ))}
           </motion.div>
-        </div>
-      </section>
-
-      {/* Stats */}
-      <section className="py-16 px-4 border-y">
-        <div className="max-w-6xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
-          {stats.map((stat, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="text-center"
-            >
-              <stat.icon className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <div className="text-3xl font-bold">{stat.value}</div>
-              <div className="text-sm text-muted-foreground">{stat.label}</div>
-            </motion.div>
-          ))}
         </div>
       </section>
 

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { Image, Video, Images, User, Home, Menu, X, FolderOpen } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { useAuthStore } from "@/stores/auth"
+import { useAuthStore, useIsAuthenticated } from "@/stores/auth"
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
@@ -19,7 +19,8 @@ const navItems = [
 export default function Navbar() {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { user, isAuthenticated, logout } = useAuthStore()
+  const { user, logout } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
 
   return (
     <>

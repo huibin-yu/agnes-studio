@@ -48,7 +48,7 @@ async def update_profile(
             content[:3] == b'\xff\xd8\xff' or  # JPEG
             content[:8] == b'\x89PNG\r\n\x1a\n' or  # PNG
             content[:4] == b'GIF8' or  # GIF
-            content[:4] == b'RIFF' and content[8:12] == b'WEBP'  # WebP
+            (content[:4] == b'RIFF' and content[8:12] == b'WEBP')  # WebP
         )
         if not is_valid_image:
             raise HTTPException(status_code=400, detail="Invalid image file")
@@ -61,7 +61,7 @@ async def update_profile(
         avatar_path = upload_dir / f"{current_user.id}_{safe_name}"
         avatar_path.write_bytes(content)
 
-        current_user.avatar_url = f"/uploads/avatars/{safe_name}"
+        current_user.avatar_url = f"/uploads/avatars/{current_user.id}_{safe_name}"
 
     await db.commit()
     await db.refresh(current_user)
