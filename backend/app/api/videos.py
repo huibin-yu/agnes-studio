@@ -23,10 +23,7 @@ limiter = Limiter(key_func=get_remote_address)
 def _video_value(video: Any, field: str, default: Any = None) -> Any:
     if isinstance(video, dict):
         return video.get(field, default)
-    value = getattr(video, field, default)
-    if value.__class__.__module__.startswith("unittest.mock"):
-        return default
-    return value
+    return getattr(video, field, default)
 
 
 def _video_generate_response(video: Any) -> dict:

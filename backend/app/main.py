@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from sqlalchemy import text as sa_text
 from pathlib import Path
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -35,13 +36,27 @@ if "sqlite" in settings.DATABASE_URL and os.environ.get("UVICORN_WORKERS", "1") 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables
+    # Startup
     logger.info("Starting Agnes Studio API...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables ensured.")
+    if "sqlite" in settings.DATABASE_URL:
+        # Development: create_all is sufficient for SQLite
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables ensured (SQLite dev mode).")
+    else:
+        # Production: run Alembic migrations
+        try:
+            from alembic.config import Config as AlembicConfig
+            from alembic import command as alembic_cmd
+            alembic_cfg = AlembicConfig("alembic.ini")
+            alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+            alembic_cmd.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations applied successfully.")
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
+            logger.warning("Run 'alembic upgrade head' manually.")
     yield
-    # Shutdown: cleanup
+    # Shutdown
     logger.info("Shutting down Agnes Studio API...")
     await engine.dispose()
 
@@ -103,7 +118,7 @@ async def health_check():
     try:
         from app.core.database import async_session
         async with async_session() as session:
-            await session.execute("SELECT 1")
+            await session.execute(sa_text("SELECT 1"))
         db_ok = True
     except Exception as e:
         logger.warning(f"Database health check failed: {e}")
