@@ -8,6 +8,7 @@ interface User {
   avatar_url?: string
   credits: number
   is_verified: boolean
+  referral_code?: string
 }
 
 interface AuthState {
@@ -21,6 +22,22 @@ interface AuthState {
   login: (accessToken: string, refreshToken: string, user: User) => void
   logout: () => void
   updateCredits: (credits: number) => void
+}
+
+/**
+ * Sets a non-httpOnly cookie that the Next.js middleware reads to gate
+ * protected routes. The cookie only signals "logged in or not"; it does
+ * NOT contain any token. This is a stop-gap until P1-4 moves tokens to
+ * httpOnly cookies.
+ */
+function setAuthCookie(authenticated: boolean) {
+  if (typeof document === 'undefined') return
+  if (authenticated) {
+    // 30-day expiry, matches refresh token lifetime
+    document.cookie = 'agnes-auth=1; path=/; max-age=2592000; SameSite=Lax'
+  } else {
+    document.cookie = 'agnes-auth=; path=/; max-age=0; SameSite=Lax'
+  }
 }
 
 /**
@@ -39,15 +56,20 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
 
       setUser: (user) => set({ user }),
-      setAccessToken: (accessToken) => set({ accessToken }),
+      setAccessToken: (accessToken) => {
+        set({ accessToken })
+        setAuthCookie(accessToken !== null)
+      },
       setRefreshToken: (refreshToken) => set({ refreshToken }),
 
       login: (accessToken, refreshToken, user) => {
         set({ accessToken, refreshToken, user })
+        setAuthCookie(true)
       },
 
       logout: () => {
         set({ user: null, accessToken: null, refreshToken: null })
+        setAuthCookie(false)
       },
 
       updateCredits: (credits) =>
@@ -62,6 +84,13 @@ export const useAuthStore = create<AuthState>()(
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
       }),
+      onRehydrateStorage: () => (state) => {
+        // Sync cookie with rehydrated state on page load
+        if (state) {
+          setAuthCookie(state.user !== null && state.accessToken !== null)
+        }
+      },
     }
   )
 )
+
