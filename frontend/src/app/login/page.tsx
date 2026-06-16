@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Mail, Lock, User, Eye, EyeOff } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { useAuthStore } from "@/stores/auth"
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const login = useAuthStore((s) => s.login)
 
   const [isLogin, setIsLogin] = useState(true)
@@ -27,12 +28,14 @@ export default function LoginPage() {
     setError("")
     setLoading(true)
 
+    const redirectUrl = searchParams.get("redirect") || "/"
+
     try {
       if (isLogin) {
         const response = await api.post("/auth/login", { email, password })
         const { access_token, refresh_token, user } = response.data
         login(access_token, refresh_token, user)
-        router.push("/")
+        router.push(redirectUrl)
       } else {
         const response = await api.post("/auth/register", {
           email,
@@ -43,7 +46,7 @@ export default function LoginPage() {
         const loginResp = await api.post("/auth/login", { email, password })
         const { access_token, refresh_token, user } = loginResp.data
         login(access_token, refresh_token, user)
-        router.push("/")
+        router.push(redirectUrl)
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { detail?: string } } }
