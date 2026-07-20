@@ -16,6 +16,7 @@ import { useGenerationStore } from '@/stores/generation'
 import { api } from '@/lib/api'
 import { IMAGE_MODELS, IMAGE_SIZES, IMAGE_STYLES } from '@/lib/image-constants'
 import { IMAGE_PROMPT_TEMPLATES, enhanceImagePrompt } from '@/lib/prompt-tools'
+import { showToast } from '@/components/ui/toast'
 
 interface ImageResult {
   id: number
@@ -176,8 +177,12 @@ export default function ImageGenerationPage() {
         createdAt: new Date().toISOString(),
       })
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string }
-      setError(axiosErr.response?.data?.detail || axiosErr.message || '图片生成失败，请重试')
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+      const message = axiosErr.response?.status === 402
+        ? '积分余额不足，本次预计消耗 1 积分，请充值后重试'
+        : axiosErr.response?.data?.detail || axiosErr.message || '图片生成失败，请重试'
+      setError(message)
+      showToast(message, axiosErr.response?.status === 402 ? 'warning' : 'error')
     } finally {
       setIsGenerating(false)
       setIsUploading(false)

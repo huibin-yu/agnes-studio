@@ -9,6 +9,16 @@ from app.services.video_service import video_service
 from app.core.config import settings
 
 
+def test_register_bonus_covers_default_video_cost():
+    """Default onboarding credits should cover the default video request."""
+    default_cost = math.ceil(
+        (settings.VIDEO_DEFAULT_FRAMES / settings.VIDEO_DEFAULT_FPS)
+        * settings.VIDEO_COST_PER_SECOND
+    )
+
+    assert settings.FREE_CREDITS_ON_REGISTER >= default_cost
+
+
 @pytest.mark.asyncio
 async def test_video_create_charges_credits_on_upstream_success(db, monkeypatch):
     """Happy path: upstream returns task -> credits decrement, credits_charged set."""

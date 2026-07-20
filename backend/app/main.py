@@ -74,9 +74,17 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS - restrict to specific methods and headers
+cors_origins = [
+    origin.strip()
+    for origin in settings.CORS_ORIGINS.split(",")
+    if origin.strip()
+]
+if settings.BASE_URL not in cors_origins:
+    cors_origins.append(settings.BASE_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.BASE_URL],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "Accept"],

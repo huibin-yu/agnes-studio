@@ -4,6 +4,7 @@ from httpx import AsyncClient
 
 from app.schemas.auth import UserRegister, UserLogin
 from app.services.auth_service import auth_service
+from app.core.config import settings
 
 
 @pytest.mark.asyncio
@@ -18,7 +19,7 @@ async def test_register(client: AsyncClient):
     data = resp.json()
     assert data["email"] == "new@example.com"
     assert data["username"] == "newuser"
-    assert data["credits"] == 10
+    assert data["credits"] == settings.FREE_CREDITS_ON_REGISTER
 
 
 @pytest.mark.asyncio
@@ -188,5 +189,5 @@ async def test_register_writes_register_bonus_ledger(db):
     )).scalars().all()
     assert len(txs) == 1
     assert txs[0].type == TX_REGISTER_BONUS
-    assert txs[0].amount == 10
-    assert txs[0].balance_after == 10
+    assert txs[0].amount == settings.FREE_CREDITS_ON_REGISTER
+    assert txs[0].balance_after == settings.FREE_CREDITS_ON_REGISTER

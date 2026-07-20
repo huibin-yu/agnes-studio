@@ -16,6 +16,7 @@ import { useGenerationStore } from '@/stores/generation'
 import { api } from '@/lib/api'
 import { VIDEO_MODEL, VALID_FRAME_COUNTS, VALID_FRAME_RATES, VIDEO_DURATIONS } from '@/lib/video-constants'
 import { VIDEO_PROMPT_TEMPLATES, enhanceVideoPrompt } from '@/lib/prompt-tools'
+import { showToast } from '@/components/ui/toast'
 
 const MAX_POLL_ATTEMPTS = 120 // 10 minutes at 5s intervals
 
@@ -145,8 +146,12 @@ export default function VideoGenerationPage() {
       setVideoId(response.data.id)
       setVideoStatus(response.data.status)
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      setError(axiosErr.response?.data?.detail || '视频生成请求失败')
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+      const message = axiosErr.response?.status === 402
+        ? `积分余额不足，本次预计消耗 ${estimatedCredits} 积分，请充值或选择更短时长后重试`
+        : axiosErr.response?.data?.detail || '视频生成请求失败'
+      setError(message)
+      showToast(message, axiosErr.response?.status === 402 ? 'warning' : 'error')
     } finally {
       setIsGenerating(false)
     }

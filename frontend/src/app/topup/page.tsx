@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 const PACKAGES = [
-  { credits: 10, price: 0, featured: false, label: "免费体验" },
+  { credits: 12, price: 0, featured: false, label: "免费体验" },
   { credits: 50, price: 9.9, featured: false, label: "入门套餐" },
   { credits: 200, price: 29.9, featured: true, label: "专业套餐" },
   { credits: 1000, price: 99.9, featured: false, label: "企业套餐" },
@@ -59,7 +59,7 @@ export default function TopUpPage() {
           <ul className="list-disc list-inside mt-1 space-y-1">
             <li>生图消耗 1 积分/张</li>
             <li>生视频消耗 2 积分/秒</li>
-            <li>注册即赠送 10 积分</li>
+            <li>注册即赠送 12 积分</li>
             <li>邀请好友各得 5 积分</li>
           </ul>
         </div>

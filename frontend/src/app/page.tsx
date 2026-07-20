@@ -144,7 +144,7 @@ export default function HomePage() {
         <div className="max-w-4xl mx-auto text-center p-12 rounded-2xl bg-gradient-to-br from-violet-500/10 via-purple-500/10 to-pink-500/10 border border-primary/20">
           <h2 className="text-3xl md:text-4xl font-bold mb-4">准备好开始创作了吗？</h2>
           <p className="text-muted-foreground text-lg mb-8">
-            注册即送 10 免费积分，体验 AI 生成的魅力
+            注册即送 12 免费积分，体验 AI 生成的魅力
           </p>
           <Link href="/register">
             <Button size="lg" variant="glow" className="gap-2 px-8 text-base">

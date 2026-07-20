@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     GENERATED_DIR: str = "./generated"
     BASE_URL: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Generation Settings
     IMAGE_DEFAULT_SIZE: str = "1024x768"
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     # Pricing (credits)
     IMAGE_COST: int = 1  # 1 credit per image
     VIDEO_COST_PER_SECOND: int = 2  # 2 credits per second of video
-    FREE_CREDITS_ON_REGISTER: int = 10
+    FREE_CREDITS_ON_REGISTER: int = 12
     REFERRAL_BONUS: int = 5
 
     # Rate limiting (requests per minute)
