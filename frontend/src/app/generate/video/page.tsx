@@ -11,7 +11,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, Video, Sparkles, Download, Share2, Wand2 } from 'lucide-react'
+import { Loader2, Video, Sparkles, Download, Share2, Wand2, Image as ImageIcon, X, Type } from 'lucide-react'
+import { useDropzone } from 'react-dropzone'
 import { useGenerationStore } from '@/stores/generation'
 import { api } from '@/lib/api'
 import { VIDEO_MODEL, VALID_FRAME_COUNTS, VALID_FRAME_RATES, VIDEO_DURATIONS } from '@/lib/video-constants'
@@ -50,6 +51,8 @@ function estimateVideoCredits(frames: number, fps: number) {
 }
 
 export default function VideoGenerationPage() {
+  const [mode, setMode] = useState<'ti2vid' | 'i2v'>('ti2vid')
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string>('')
   const [prompt, setPrompt] = useState('')
   const [numFrames, setNumFrames] = useState(121)
   const [frameRate, setFrameRate] = useState(24)
@@ -128,6 +131,11 @@ export default function VideoGenerationPage() {
       return
     }
 
+    if (mode === 'i2v' && !referenceImageUrl) {
+      setError('请先上传参考图片')
+      return
+    }
+
     setIsGenerating(true)
     setError('')
     setVideoStatus('')
@@ -141,6 +149,8 @@ export default function VideoGenerationPage() {
         model: VIDEO_MODEL,
         num_frames: numFrames,
         frame_rate: frameRate,
+        mode,
+        ...(mode === 'i2v' && referenceImageUrl ? { image: referenceImageUrl } : {}),
       })
 
       setVideoId(response.data.id)
@@ -155,6 +165,41 @@ export default function VideoGenerationPage() {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  // Reference image dropzone (for image-to-video mode)
+  const onDropReference = useCallback(async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0]
+    if (!file) return
+    if (file.size > 10 * 1024 * 1024) {
+      setError('图片大小不能超过 10MB')
+      return
+    }
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const resp = await api.post('/images/upload-reference', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 60000,
+      })
+      setReferenceImageUrl(resp.data.image_url)
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      setError(axiosErr.response?.data?.detail || '参考图上传失败')
+    }
+  }, [])
+
+  const dropzone = useDropzone({
+    onDrop: onDropReference,
+    accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp'] },
+    maxSize: 10 * 1024 * 1024,
+    multiple: false,
+    noClick: false,
+  })
+
+  const removeReferenceImage = () => {
+    setReferenceImageUrl('')
   }
 
   const applyUseCase = (useCaseId: string) => {
@@ -194,6 +239,83 @@ export default function VideoGenerationPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Mode Switcher */}
+          <div>
+            <label className="text-sm font-medium">生成模式</label>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => setMode('ti2vid')}
+                className={`flex items-center gap-2 rounded-lg border p-3 transition-colors ${
+                  mode === 'ti2vid'
+                    ? 'border-primary bg-primary/10'
+                    : 'hover:border-primary hover:bg-muted/50'
+                }`}
+              >
+                <Type className="w-4 h-4" />
+                <div className="text-left">
+                  <div className="text-sm font-medium">文生视频</div>
+                  <div className="text-xs text-muted-foreground">仅根据文字描述生成</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('i2v')}
+                className={`flex items-center gap-2 rounded-lg border p-3 transition-colors ${
+                  mode === 'i2v'
+                    ? 'border-primary bg-primary/10'
+                    : 'hover:border-primary hover:bg-muted/50'
+                }`}
+              >
+                <ImageIcon className="w-4 h-4" />
+                <div className="text-left">
+                  <div className="text-sm font-medium">图生视频</div>
+                  <div className="text-xs text-muted-foreground">基于参考图生成动画</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Reference Image Upload (only for i2v mode) */}
+          {mode === 'i2v' && (
+            <div>
+              <label className="text-sm font-medium">参考图片</label>
+              {referenceImageUrl ? (
+                <div className="relative mt-2 inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={referenceImageUrl}
+                    alt="reference"
+                    className="max-h-48 rounded-lg border"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeReferenceImage}
+                    className="absolute top-2 right-2 p-1 rounded-full bg-black/50 hover:bg-black/70 text-white"
+                    aria-label="删除参考图"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  {...dropzone.getRootProps()}
+                  className={`mt-2 border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                    dropzone.isDragActive
+                      ? 'border-primary bg-primary/5'
+                      : 'hover:border-primary hover:bg-muted/30'
+                  }`}
+                >
+                  <input {...dropzone.getInputProps()} />
+                  <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    {dropzone.isDragActive ? '松开以上传图片' : '点击或拖拽上传参考图（最大 10MB）'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="text-sm font-medium">参数预设</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">

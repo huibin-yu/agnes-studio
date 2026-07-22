@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     avatar_url: Optional[str] = None
     credits: int
     is_verified: bool
+    referral_code: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

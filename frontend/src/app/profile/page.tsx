@@ -1,11 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Camera, LogOut, Coins, Image as ImageIcon, Video, Shield, Key, FolderOpen } from "lucide-react"
+import { Camera, LogOut, Coins, Image as ImageIcon, Video, Shield, Key, FolderOpen, Gift, Copy, Check } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { useAuthStore } from "@/stores/auth"
 
@@ -18,6 +17,7 @@ export default function ProfilePage() {
   const { user, logout } = useAuthStore()
   const [stats, setStats] = useState<UserStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -31,6 +31,21 @@ export default function ProfilePage() {
     }
     fetchStats()
   }, [])
+
+  const referralCode = user?.referral_code
+  const referralLink = referralCode
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/login?ref=${referralCode}`
+    : ""
+
+  const copyReferral = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="min-h-screen pt-20 pb-10 px-4">
@@ -85,6 +100,55 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Referral System */}
+        {referralCode && (
+          <Card className="border-primary/30 bg-gradient-to-br from-violet-500/5 to-pink-500/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Gift className="w-5 h-5 text-primary" />
+                邀请好友，各得 5 积分
+              </CardTitle>
+              <CardDescription>
+                分享你的专属推荐码或链接，朋友注册成功后双方各获得 5 积分奖励
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">推荐码</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3 py-2 rounded-lg bg-muted font-mono text-sm">
+                    {referralCode}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyReferral(referralCode)}
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copied ? "已复制" : "复制"}
+                  </Button>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">推荐链接</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3 py-2 rounded-lg bg-muted text-sm truncate">
+                    {referralLink}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyReferral(referralLink)}
+                  >
+                    <Copy className="w-4 h-4" />
+                    复制链接
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Quick Actions */}
         <div className="grid md:grid-cols-2 gap-4">

@@ -3,6 +3,8 @@
 import { Coins, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useIsAuthenticated } from "@/stores/auth"
+import Link from "next/link"
 
 const PACKAGES = [
   { credits: 12, price: 0, featured: false, label: "免费体验" },
@@ -12,6 +14,8 @@ const PACKAGES = [
 ]
 
 export default function TopUpPage() {
+  const isAuthenticated = useIsAuthenticated()
+
   return (
     <div className="min-h-screen pt-20 pb-10 px-4">
       <div className="max-w-3xl mx-auto">
@@ -46,9 +50,17 @@ export default function TopUpPage() {
                     支持生图和生视频
                   </li>
                 </ul>
-                <Button className="w-full" variant={pkg.featured ? "glow" : "default"}>
-                  {pkg.price === 0 ? "领取" : "立即购买"}
-                </Button>
+                {pkg.price === 0 ? (
+                  <Link href={isAuthenticated ? "#" : "/login"} className="block">
+                    <Button className="w-full" variant="default">
+                      {isAuthenticated ? "已领取" : "注册领取"}
+                    </Button>
+                  </Link>
+                ) : (
+                  <Button className="w-full" variant={pkg.featured ? "glow" : "default"} disabled>
+                    即将上线
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ))}
